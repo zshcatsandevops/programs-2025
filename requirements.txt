@@ -1,0 +1,8 @@
+# Ultra Mario 2D Bros - Dependencies
+# Python 3.7+ required
+
+# Core game engine
+pygame>=2.0.0
+
+# Optional: For better performance
+numpy>=1.19.0
