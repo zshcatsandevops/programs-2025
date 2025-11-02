@@ -34,7 +34,7 @@ JUMP_VEL, JUMP_CUT = -720.0, -260.0
 COYOTE, JUMP_BUF = 0.08, 0.12
 START_LIVES, START_TIME = 3, 300
 GROUND_Y = BASE_H // TILE - 2
-SOLID_TILES, HARM_TILES = set("XBP#FG"), set("H")
+SOLID_TILES, HARM_TILES = set("XBP#FGI"), set("H")  # Added I for pipe
 
 def clamp(v, lo, hi): return max(lo, min(hi, v))
 def rect_from_grid(gx, gy): return pygame.Rect(gx*TILE, gy*TILE, TILE, TILE)
@@ -53,7 +53,12 @@ class Tileset:
                   'gray':(168,168,168),'dark_gray':(88,88,88),
                   'green':(0,168,0),'dark_green':(0,104,0),
                   'red':(228,0,88),'sky1':(112,200,248),'sky2':(184,232,248),
-                  'white':(248,248,248),'black':(0,0,0),'orange':(255,132,0)}
+                  'white':(248,248,248),'black':(0,0,0),'orange':(255,132,0),
+                  'skin':(248,216,112), 'mario_red':(230,37,37), 'mario_brown':(136,87,24),
+                  'mario_blue':(64,128,152),  # SMW palette
+                  'mario_dark_red':(80,0,0), 'mario_dark_blue':(32,48,136), 
+                  'mario_dark_skin':(168,128,48), 'mario_dark_brown':(88,56,0),
+                  'cloud':(240,240,240)}
     def _make_sky(self):
         surf = pygame.Surface((BASE_W, BASE_H))
         for y in range(BASE_H):
@@ -76,17 +81,125 @@ class Tileset:
                     s.set_at((x,y),c['dark_brown'])
         elif ch=='#': s.fill(c['gray']); pygame.draw.rect(s,c['dark_gray'],(0,0,TILE,TILE),2)
         elif ch=='B': s.fill((216,128,88)); pygame.draw.line(s,(168,80,0),(0,8),(TILE,8))
-        elif ch=='?': s.fill(c['yellow']); t=self.font_small.render("?",1,c['brown']); s.blit(t,(8-t.get_width()//2,4))
+        elif ch=='P': s.fill(c['yellow']); t=self.font_small.render("?",1,c['brown']); s.blit(t,(8-t.get_width()//2,4))
         elif ch=='F': pygame.draw.rect(s,c['gray'],(TILE//2-1,0,2,TILE))
         elif ch=='G': s.fill(c['dark_gray'])
         elif ch=='C': pygame.draw.circle(s,c['yellow'],(8,8),5); pygame.draw.circle(s,(200,150,0),(8,8),5,1)
         elif ch=='H': s.fill(c['red']); [pygame.draw.polygon(s,c['yellow'],[(x,TILE),(x+2,TILE-6),(x+4,TILE)]) for x in range(0,TILE,4)]
+        elif ch=='I':  # Pipe tile, SMB1 style
+            s.fill(c['green'])
+            pygame.draw.rect(s,c['dark_green'],(0,0,TILE,TILE),2)
+            pygame.draw.rect(s,c['black'],(2,2,TILE-4,TILE-4),1)
+        elif ch=='L':  # Cloud tile
+            s.fill((0,0,0,0))  # Transparent
+            pygame.draw.circle(s,c['cloud'],(5,8),4)
+            pygame.draw.circle(s,c['cloud'],(11,8),4)
+            pygame.draw.circle(s,c['cloud'],(8,5),3)
         self.cache[ch]=s; return s
     def sprite(self,name):
         if name in self.sprite_cache: return self.sprite_cache[name]
         c=self.c
         s=pygame.Surface((12,16),pygame.SRCALPHA)
-        pygame.draw.rect(s,c['red'],(3,0,6,6)); pygame.draw.rect(s,c['yellow'],(4,6,4,10))
+        if name == 'mario_small_stand':
+            # Updated for SMW/FNF style
+            data = [
+                "   RRR   ",  
+                "  RRRRR  ",  
+                "  bSb b  ",  
+                " bSSSbb  ",  
+                " bS k bb ",  
+                " bSSSSb  ",  
+                "  bSSb   ",  
+                "   RRR   ",  
+                "  RRRRR  ",  
+                " UUU UUU ",  
+                "UUU U UUU",  
+                "UUU U UUU",  
+                "UU UUU UU",  
+                "  bbb    ",  
+                " bb  bb  ",  
+                "bb    bb "   
+            ]
+            color_map = {'R': 'mario_red', 'b': 'mario_dark_brown', 'S': 'skin', 'U': 'mario_blue', 'k': 'black'}
+            for y, row in enumerate(data):
+                for x, ch in enumerate(row):
+                    if ch != ' ':
+                        s.set_at((x, y), c[color_map[ch]])
+        elif name == 'mario_small_walk1':
+            # Walking animation frame 1
+            data = [
+                "   RRR   ",  
+                "  RRRRR  ",  
+                "  bSb b  ",  
+                " bSSSbb  ",  
+                " bS k bb ",  
+                " bSSSSb  ",  
+                "  bSSb   ",  
+                "   RRR   ",  
+                "  RRRRR  ",  
+                " UUU UUU ",  
+                "UUU U UUU",  
+                "UUU U UUU",  
+                "UU UUU UU",  
+                "  bbb    ",  
+                " bb  bb  ",  
+                "bb    bb "   
+            ]
+            color_map = {'R': 'mario_red', 'b': 'mario_dark_brown', 'S': 'skin', 'U': 'mario_blue', 'k': 'black'}
+            for y, row in enumerate(data):
+                for x, ch in enumerate(row):
+                    if ch != ' ':
+                        s.set_at((x, y), c[color_map[ch]])
+        elif name == 'mario_small_walk2':
+            # Walking animation frame 2
+            data = [
+                "   RRR   ",  
+                "  RRRRR  ",  
+                "  bSb b  ",  
+                " bSSSbb  ",  
+                " bS k bb ",  
+                " bSSSSb  ",  
+                "  bSSb   ",  
+                "   RRR   ",  
+                "  RRRRR  ",  
+                " UUU UUU ",  
+                "UUU U UUU",  
+                "UUU U UUU",  
+                "UU UUU UU",  
+                "  bbb    ",  
+                " bb  bb  ",  
+                "bb    bb "   
+            ]
+            color_map = {'R': 'mario_red', 'b': 'mario_dark_brown', 'S': 'skin', 'U': 'mario_blue', 'k': 'black'}
+            for y, row in enumerate(data):
+                for x, ch in enumerate(row):
+                    if ch != ' ':
+                        s.set_at((x, y), c[color_map[ch]])
+        elif name == 'mario_small_jump':
+            # Jumping frame
+            data = [
+                "   RRR   ",  
+                "  RRRRR  ",  
+                "  bSb b  ",  
+                " bSSSbb  ",  
+                " bS k bb ",  
+                " bSSSSb  ",  
+                "  bSSb   ",  
+                "   RRR   ",  
+                "  RRRRR  ",  
+                " UUU UUU ",  
+                "UUU U UUU",  
+                "UUU U UUU",  
+                "UU UUU UU",  
+                "  bbb    ",  
+                " bb  bb  ",  
+                "bb    bb "   
+            ]
+            color_map = {'R': 'mario_red', 'b': 'mario_dark_brown', 'S': 'skin', 'U': 'mario_blue', 'k': 'black'}
+            for y, row in enumerate(data):
+                for x, ch in enumerate(row):
+                    if ch != ' ':
+                        s.set_at((x, y), c[color_map[ch]])
         self.sprite_cache[name]=s; return s
 
 # ───────────── Level ─────────────
@@ -103,7 +216,7 @@ class Level:
     def _set(self,x,y,ch): r=list(self.grid[y]); r[x]=ch; self.grid[y]=''.join(r)
     def tile(self,x,y): return self.grid[y][x] if 0<=x<self.w and 0<=y<self.h else ' '
     def solid_cells(self,r):
-        cells=[]; gx0=max(r.left//TILE,0); gy0=max(r.top//TILE,0)
+        cells = []; gx0=max(r.left//TILE,0); gy0=max(r.top//TILE,0)
         gx1=min((r.right-1)//TILE,self.w-1); gy1=min((r.bottom-1)//TILE,self.h-1)
         for gy in range(gy0,gy1+1):
             for gx in range(gx0,gx1+1):
@@ -136,6 +249,7 @@ class Player(Entity):
         self.lives,self.coins,self.score=START_LIVES,0,0
         self.facing=True; self.on_ground=False; self.dead=False
         self.coyote=self.buf=0; self.inv=0; self.game: Optional['Game'] = None; self.fire=False
+        self.walk_timer=0
     def _collide(self,g,dt):
         level=g.level
         self.rect.x+=int(self.vx*dt)
@@ -153,9 +267,11 @@ class Player(Entity):
         k=pygame.key.get_pressed(); ax=0
         if k[pygame.K_LEFT]^k[pygame.K_RIGHT]:
             ax=-ACCEL if k[pygame.K_LEFT] else ACCEL; self.facing=not k[pygame.K_LEFT]
+            self.walk_timer += dt
         else:
             if abs(self.vx)<20:self.vx=0
             ax=-FRICTION if self.vx>0 else FRICTION if self.vx<0 else 0
+            self.walk_timer = 0
         maxv=MAX_RUN if (k[pygame.K_LSHIFT] or k[pygame.K_RSHIFT]) else MAX_WALK
         self.vx=clamp(self.vx+ax*dt,-maxv,maxv)
         self.coyote=max(0,self.coyote-dt); self.buf=max(0,self.buf-dt)
@@ -174,7 +290,21 @@ class Player(Entity):
         if self.dead:return
         self.dead=True;self.vx=0;self.vy=-320;g.player_died()
     def draw(self,g,s,cx):
-        surf=g.tiles.sprite('mario_small_stand')
+        # Choose sprite based on state
+        if self.dead:
+            sprite_name = 'mario_small_stand'
+        elif not self.on_ground:
+            sprite_name = 'mario_small_jump'
+        elif abs(self.vx) > 20:
+            # Walking animation
+            if int(self.walk_timer * 10) % 2 == 0:
+                sprite_name = 'mario_small_walk1'
+            else:
+                sprite_name = 'mario_small_walk2'
+        else:
+            sprite_name = 'mario_small_stand'
+            
+        surf=g.tiles.sprite(sprite_name)
         if not self.facing: surf=pygame.transform.flip(surf,True,False)
         s.blit(surf,self.rect.move(-cx,0))
 
@@ -237,7 +367,39 @@ def make_level(world,stage):
     for _ in range(10):
         hx=rng.randint(8,fx-12)
         g[GROUND_Y-1]=g[GROUND_Y-1][:hx]+'H'+g[GROUND_Y-1][hx+1:]
+    
+    # Create level object before using it
     lvl=Level(g)
+    
+    # Add more SMB1-like features
+    # Pipes
+    for _ in range(8):
+        px = rng.randint(10, fx-10)
+        height = rng.randint(2,5)
+        for dy in range(height):
+            y = GROUND_Y - 1 - dy
+            for dx in range(2):
+                if px+dx < w:
+                    g[y]=g[y][:px+dx]+'I'+g[y][px+dx+1:]
+        if rng.random() < 0.4:
+            lvl._set(px, GROUND_Y - height - 1, 'E')  # Enemy on pipe
+    # Holes
+    for _ in range(5):
+        px = rng.randint(10, fx-10)
+        length = rng.randint(2,5)
+        for dx in range(length):
+            for y in range(GROUND_Y, h):
+                g[y]=g[y][:px+dx]+' ' +g[y][px+dx+1:]  # Remove ground
+            g[GROUND_Y]=g[GROUND_Y][:px+dx]+'H' +g[GROUND_Y][px+dx+1:]  # Harm at bottom
+    # Clouds (non-solid)
+    for _ in range(8):
+        px = rng.randint(0, w-5)
+        py = rng.randint(1,4)
+        for dx in range(3):
+            g[py]=g[py][:px+dx]+'L' +g[py][px+dx+1:]
+        for dx in range(2):
+            g[py-1]=g[py-1][:px+dx+1]+'L' +g[py-1][px+dx+2:]
+    
     for _ in range(12):
         gx=rng.randint(5,fx-10)
         if rng.random()<0.45: lvl._set(gx,GROUND_Y-2,'E')
@@ -273,7 +435,8 @@ class Game:
         nxt = self.stage + 1
         if nxt>4:self.stage=1;self.world+=1
         else:self.stage=nxt
-        self.load(self.world,self.stage)
+        if self.world > 8: self.state = "title"  # End after 32 levels (8 worlds x 4 stages)
+        else: self.load(self.world,self.stage)
     def update(self,dt):
         k=pygame.key.get_pressed()
         pressed_jump=(k[pygame.K_SPACE] or k[pygame.K_z])
