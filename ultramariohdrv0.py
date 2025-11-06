@@ -1,458 +1,947 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Ultra Mario 2D Bros v1.1.1 (Stable Fixed Build)
----------------------------------------------
-Procedural NES-style platformer (single-file, no external assets)
-Title screen + HUD + coins + flag goal + simple enemies + fireballs.
+Ultra Mario 3D Bros — Final Build 1.x
+Tkinter main menu + Ursina 3D engine
 """
 
-import sys, math, random, time
-try:
-    import pygame  # type: ignore
-except ImportError:
-    sys.exit("❌  Pygame not found. Install with: pip install pygame")
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import subprocess
+import sys
+import os
+import json
+import threading
 
-# ───────────── Config ─────────────
-GAME_TITLE = "Ultra Mario 2D Bros"
-BASE_W, BASE_H, SCALE = 256, 240, 3
-SCREEN_W, SCREEN_H = BASE_W * SCALE, BASE_H * SCALE
-TILE, FPS = 16, 60
-GRAVITY = 2100.0
-MAX_WALK, MAX_RUN = 120.0, 220.0
-ACCEL, FRICTION = 1600.0, 1400.0
-JUMP_VEL, JUMP_CUT = -720.0, -260.0
-COYOTE, JUMP_BUF = 0.08, 0.12
-START_LIVES, START_TIME = 3, 300
-GROUND_Y = BASE_H // TILE - 2
-SOLID_TILES, HARM_TILES = set("XBP#FG"), set("H")
-
-# ───────────── Helpers ─────────────
-def clamp(v, lo, hi):
-    if hi < lo:
-        lo, hi = hi, lo
-    return max(lo, min(hi, v))
-
-def rect_from_grid(gx, gy):
-    return pygame.Rect(gx*TILE, gy*TILE, TILE, TILE)
-
-# ───────────── Tileset ─────────────
-class Tileset:
-    def __init__(self):
-        self.cache = {}
-        pygame.font.init()
-        self.font_small = pygame.font.SysFont("Courier", 8, bold=True)
-        self.font_hud = pygame.font.SysFont("Arial", 8, bold=True)
-        self.font_big = pygame.font.SysFont("Arial", 16, bold=True)
-        self._make_colors(); self._sky = self._make_sky()
-
-    def _make_colors(self):
-        self.c = {
-            'brown':(168,80,0),'dark_brown':(120,64,0),'yellow':(248,184,0),
-            'gray':(168,168,168),'dark_gray':(88,88,88),
-            'green':(0,168,0),'dark_green':(0,104,0),
-            'red':(228,0,88),'sky1':(112,200,248),'sky2':(184,232,248),
-            'white':(248,248,248),'black':(0,0,0)
+# ------------------------------
+# Tkinter Main Menu
+# ------------------------------
+class UltraMarioLauncher:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Ultra Mario 3D Bros - Final Build 1.x")
+        self.root.geometry("800x600")
+        self.root.configure(bg='#0a0a2a')
+        
+        # Make window not resizable
+        self.root.resizable(False, False)
+        
+        # Center the window
+        self.center_window()
+        
+        # Game settings
+        self.settings = {
+            "graphics_quality": "Medium",
+            "music_enabled": True,
+            "sound_volume": 50,
+            "custom_level_path": ""
         }
+        
+        # Load settings if available
+        self.load_settings()
+        
+        self.create_menu()
 
-    def _make_sky(self):
-        surf = pygame.Surface((BASE_W, BASE_H))
-        for y in range(BASE_H):
-            t = y / BASE_H
-            col = tuple(int(self.c['sky1'][i]*(1-t)+self.c['sky2'][i]*t) for i in range(3))
-            pygame.draw.line(surf, col, (0, y), (BASE_W, y))
-        # clouds
-        for _ in range(6):
-            x = random.randint(0, BASE_W-40); y = random.randint(8, 80)
-            for b in range(3):
-                pygame.draw.circle(surf, self.c['white'], (x + 10*b, y + (b%2)*2), 8)
-        return surf
+    def center_window(self):
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry('{}x{}+{}+{}'.format(width, height, x, y))
 
-    def sky(self): return self._sky
+    def load_settings(self):
+        try:
+            if os.path.exists("ultra_mario_settings.json"):
+                with open("ultra_mario_settings.json", "r") as f:
+                    self.settings = json.load(f)
+        except Exception as e:
+            print(f"Error loading settings: {e}")
 
-    def tile(self, ch):
-        if ch in self.cache: return self.cache[ch]
-        s = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
-        c = self.c
-        if ch == 'X':
-            s.fill(c['brown'])
-            for y in range(0, TILE, 2):
-                for x in range((y//2)%2, TILE, 2): s.set_at((x,y), c['dark_brown'])
-        elif ch == '#':
-            s.fill(c['gray']); pygame.draw.rect(s,c['dark_gray'],(0,0,TILE,TILE),2)
-        elif ch == 'B':
-            s.fill((216,128,88)); pygame.draw.line(s,(168,80,0),(0,8),(TILE,8))
-        elif ch == '?':
-            s.fill(c['yellow'])
-            t=self.font_small.render("?",1,c['brown']); s.blit(t,(8-t.get_width()//2,4))
-        elif ch == 'P':
-            s.fill(c['green']); pygame.draw.rect(s,c['dark_green'],(0,0,TILE,TILE),2)
-        elif ch == 'F':
-            pygame.draw.rect(s,c['gray'],(TILE//2-1,0,2,TILE))
-        elif ch == 'G':
-            s.fill(c['dark_gray'])
-        elif ch == 'C':
-            pygame.draw.circle(s,c['yellow'],(8,8),5)
-            pygame.draw.circle(s,(200,150,0),(8,8),5,1)
-        elif ch == 'H':
-            s.fill(c['red'])
-            for x in range(0,TILE,4):
-                pygame.draw.polygon(s,c['yellow'],[(x,TILE),(x+2,TILE-6),(x+4,TILE)])
+    def save_settings(self):
+        try:
+            with open("ultra_mario_settings.json", "w") as f:
+                json.dump(self.settings, f)
+            return True
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+            return False
+
+    def create_menu(self):
+        # Main frame
+        main_frame = tk.Frame(self.root, bg='#0a0a2a')
+        main_frame.pack(expand=True, fill='both')
+        
+        # Title
+        title_label = tk.Label(
+            main_frame,
+            text="ULTRA MARIO 3D BROS",
+            font=('Arial', 32, 'bold'),
+            fg='#FFD700',
+            bg='#0a0a2a'
+        )
+        title_label.pack(pady=(80, 20))
+        
+        subtitle_label = tk.Label(
+            main_frame,
+            text="FINAL BUILD 1.x",
+            font=('Arial', 16, 'bold'),
+            fg='#FFFFFF',
+            bg='#0a0a2a'
+        )
+        subtitle_label.pack(pady=(0, 40))
+        
+        # Menu buttons
+        button_style = {
+            'font': ('Arial', 14, 'bold'),
+            'width': 20,
+            'height': 2,
+            'bg': '#FF0000',
+            'fg': 'white',
+            'relief': 'raised',
+            'bd': 4,
+            'activebackground': '#CC0000', # Darker red on click
+            'activeforeground': 'white'
+        }
+        
+        self.start_button = tk.Button(
+            main_frame,
+            text="START GAME",
+            command=self.start_game,
+            **button_style
+        )
+        self.start_button.pack(pady=10)
+        
+        self.files_button = tk.Button(
+            main_frame,
+            text="FILES SELECT",
+            command=self.show_files,
+            **button_style  # Now enabled with normal style
+        )
+        self.files_button.pack(pady=10)
+        
+        self.options_button = tk.Button(
+            main_frame,
+            text="OPTIONS",
+            command=self.show_options,
+            **button_style
+        )
+        self.options_button.pack(pady=10)
+        
+        self.quit_button = tk.Button(
+            main_frame,
+            text="QUIT GAME",
+            command=self.quit_game,
+            **button_style
+        )
+        self.quit_button.pack(pady=10)
+        
+        # Status bar
+        status_frame = tk.Frame(main_frame, bg='#0a0a2a')
+        status_frame.pack(side='bottom', fill='x', pady=20)
+        
+        self.status_label = tk.Label(
+            status_frame,
+            text="Ready to play Ultra Mario 3D Bros!",
+            font=('Arial', 10),
+            fg='#00FF00',
+            bg='#0a0a2a'
+        )
+        self.status_label.pack()
+
+    def start_game(self):
+        self.status_label.config(text="Launching 3D Engine...")
+        self.root.update()
+        
+        # Launch Ursina game in a separate thread
+        threading.Thread(target=self.launch_ursina, daemon=True).start()
+        
+        # Close Tkinter window after a short delay
+        self.root.after(1000, self.root.destroy)
+
+    def launch_ursina(self):
+        try:
+            # Import and run the Ursina game
+            ursina_game = UrsinaGame(self.settings)
+            ursina_game.run()
+        except ImportError:
+            print("--------------------------------------------------")
+            print("FATAL ERROR: 'ursina' module not found.")
+            print("Please install Ursina to play this game:")
+            print("  pip install ursina")
+            print("--------------------------------------------------")
+        except Exception as e:
+            print(f"Error launching game: {e}")
+
+    def show_files(self):
+        # Create a new Toplevel window for file selection
+        try:
+            self.files_window = tk.Toplevel(self.root)
+            self.files_window.title("File Selection")
+            self.files_window.geometry("600x400")
+            self.files_window.configure(bg='#0a0a2a')
+            self.files_window.resizable(False, False)
+
+            # Center the files window relative to the main window
+            self.root.update_idletasks()
+            main_x = self.root.winfo_x()
+            main_y = self.root.winfo_y()
+            main_w = self.root.winfo_width()
+            main_h = self.root.winfo_height()
+            
+            files_w = 600
+            files_h = 400
+            files_x = main_x + (main_w // 2) - (files_w // 2)
+            files_y = main_y + (main_h // 2) - (files_h // 2)
+            
+            self.files_window.geometry(f'{files_w}x{files_h}+{files_x}+{files_y}')
+
+            # Make the files window modal (grabs focus)
+            self.files_window.grab_set()
+            self.files_window.transient(self.root)
+
+            files_frame = tk.Frame(self.files_window, bg='#0a0a2a')
+            files_frame.pack(expand=True, fill='both', padx=20, pady=20)
+
+            # Title
+            files_title = tk.Label(
+                files_frame,
+                text="Select Custom Level File",
+                font=('Arial', 16, 'bold'),
+                fg='white',
+                bg='#0a0a2a'
+            )
+            files_title.pack(pady=(0, 20))
+
+            # Current file path
+            current_file_frame = tk.Frame(files_frame, bg='#0a0a2a')
+            current_file_frame.pack(fill='x', pady=10)
+            
+            current_file_label = tk.Label(
+                current_file_frame,
+                text="Current Level:",
+                font=('Arial', 12),
+                fg='white',
+                bg='#0a0a2a'
+            )
+            current_file_label.pack(side='left', padx=(0, 10))
+            
+            self.current_file_var = tk.StringVar(value=self.settings.get("custom_level_path", "Default Level"))
+            current_file_display = tk.Label(
+                current_file_frame,
+                textvariable=self.current_file_var,
+                font=('Arial', 12),
+                fg='#00FF00',
+                bg='#0a0a2a'
+            )
+            current_file_display.pack(side='left')
+            
+            # File selection
+            file_button = tk.Button(
+                files_frame,
+                text="Browse for Level File",
+                command=self.browse_file,
+                font=('Arial', 12),
+                width=20,
+                height=2,
+                bg='#FF0000',
+                fg='white',
+                relief='raised',
+                bd=4,
+                activebackground='#CC0000',
+                activeforeground='white'
+            )
+            file_button.pack(pady=20)
+            
+            # Instructions
+            instructions = tk.Label(
+                files_frame,
+                text="Select a custom level file (.json format) to load in the game.\nIf no file is selected, the default level will be used.",
+                font=('Arial', 10),
+                fg='#CCCCCC',
+                bg='#0a0a2a',
+                justify='center'
+            )
+            instructions.pack(pady=10)
+            
+            # Close Button
+            close_button = tk.Button(
+                files_frame,
+                text="Save & Close",
+                command=self.close_files,
+                font=('Arial', 12, 'bold'),
+                width=15,
+                height=2,
+                bg='#FF0000',
+                fg='white',
+                relief='raised',
+                bd=4,
+                activebackground='#CC0000',
+                activeforeground='white'
+            )
+            close_button.pack(pady=20, side='bottom')
+        
+        except Exception as e:
+            self.status_label.config(text=f"Error opening files: {e}")
+            print(f"Error opening files: {e}")
+
+    def browse_file(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Level File",
+            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")]
+        )
+        if file_path:
+            self.current_file_var.set(file_path)
+            self.settings["custom_level_path"] = file_path
+
+    def close_files(self):
+        # Save the settings
+        if self.save_settings():
+            self.status_label.config(text="File selection saved!")
         else:
-            s.fill((0,0,0,0))
-        self.cache[ch]=s; return s
+            self.status_label.config(text="Error saving file selection!")
+        
+        # Release grab and destroy the window
+        self.files_window.grab_release()
+        self.files_window.destroy()
 
-# ───────────── Level ─────────────
-class Level:
-    def __init__(self, grid):
-        self.grid = grid; self.h=len(grid); self.w=len(grid[0])
-        self.spawn_x,self.spawn_y=2*TILE,(GROUND_Y-1)*TILE
-        self.enemy_spawns=[]; self.goal_rects=[]
-        for y,row in enumerate(grid):
-            for x,ch in enumerate(row):
-                if ch=='S': self.spawn_x=x*TILE; self.spawn_y=(y-1)*TILE; self._set(x,y,' ')
-                elif ch=='E': self.enemy_spawns.append((x*TILE,(y-1)*TILE)); self._set(x,y,' ')
-                elif ch in ('F','G'): self.goal_rects.append(rect_from_grid(x,y))
-    def _set(self,x,y,ch):
-        r=list(self.grid[y]); r[x]=ch; self.grid[y]=''.join(r)
-    def tile(self,x,y):
-        if x<0 or y<0 or y>=self.h or x>=self.w: return ' '
-        return self.grid[y][x]
-    def solid_cells(self,r):
-        cells=[]; gx0=max(r.left//TILE,0); gy0=max(r.top//TILE,0)
-        gx1=min((r.right-1)//TILE,self.w-1); gy1=min((r.bottom-1)//TILE,self.h-1)
-        for gy in range(gy0,gy1+1):
-            for gx in range(gx0,gx1+1):
-                if self.tile(gx,gy) in SOLID_TILES: cells.append((gx,gy))
-        return cells
-    def harm(self,r):
-        gx0=max(r.left//TILE,0); gy0=max(r.top//TILE,0)
-        gx1=min((r.right-1)//TILE,self.w-1); gy1=min((r.bottom-1)//TILE,self.h-1)
-        for gy in range(gy0,gy1+1):
-            for gx in range(gx0,gx1+1):
-                if self.tile(gx,gy) in HARM_TILES: return True
-        return False
-    def collect_coins_in_rect(self, r):
-        collected = 0
-        gx0=max(r.left//TILE,0); gy0=max(r.top//TILE,0)
-        gx1=min((r.right-1)//TILE,self.w-1); gy1=min((r.bottom-1)//TILE,self.h-1)
-        for gy in range(gy0,gy1+1):
-            for gx in range(gx0,gx1+1):
-                if self.tile(gx,gy) == 'C':
-                    self._set(gx,gy,' ')
-                    collected += 1
-        return collected
+    def show_options(self):
+        # Create a new Toplevel window for options
+        try:
+            self.options_window = tk.Toplevel(self.root)
+            self.options_window.title("Options")
+            self.options_window.geometry("400x400")
+            self.options_window.configure(bg='#0a0a2a')
+            self.options_window.resizable(False, False)
 
-# ───────────── Entities ─────────────
-class Entity:
-    def __init__(self,x,y,w,h): self.rect=pygame.Rect(x,y,w,h); self.vx=self.vy=0; self.remove=False
-    def update(self,g,dt): pass
-    def draw(self,g,s,cx): pass
+            # Center the options window relative to the main window
+            self.root.update_idletasks()
+            main_x = self.root.winfo_x()
+            main_y = self.root.winfo_y()
+            main_w = self.root.winfo_width()
+            main_h = self.root.winfo_height()
+            
+            opt_w = 400
+            opt_h = 400
+            opt_x = main_x + (main_w // 2) - (opt_w // 2)
+            opt_y = main_y + (main_h // 2) - (opt_h // 2)
+            
+            self.options_window.geometry(f'{opt_w}x{opt_h}+{opt_x}+{opt_y}')
 
-class Player(Entity):
-    def __init__(self,x,y):
-        super().__init__(x,y,12,16)
-        self.lives,self.coins,self.score=START_LIVES,0,0
-        self.facing=True; self.on_ground=False; self.dead=False
-        self.coyote=self.buf=0; self.inv=0; self.game=None  # type: ignore
-        self.big=False; self.fire=False
-    def _collide(self,level,dt):
-        # horizontal
-        self.rect.x+=int(self.vx*dt)
-        for gx,gy in level.solid_cells(self.rect):
-            c=rect_from_grid(gx,gy)
-            if self.vx>0 and self.rect.right>c.left: self.rect.right=c.left; self.vx=0
-            elif self.vx<0 and self.rect.left<c.right: self.rect.left=c.right; self.vx=0
-        # vertical
-        self.rect.y+=int(self.vy*dt); self.on_ground=False
-        for gx,gy in level.solid_cells(self.rect):
-            c=rect_from_grid(gx,gy)
-            if self.vy>0 and self.rect.bottom>c.top:
-                self.rect.bottom=c.top; self.vy=0; self.on_ground=True; self.coyote=COYOTE
-            elif self.vy<0 and self.rect.top<c.bottom:
-                self.rect.top=c.bottom; self.vy=0
-    def update(self,g,dt):
-        if self.dead:
-            self.vy+=GRAVITY*dt; self._collide(g.level,dt); return
-        k=pygame.key.get_pressed()
-        ax=0
-        if k[pygame.K_LEFT]^k[pygame.K_RIGHT]:
-            ax=-ACCEL if k[pygame.K_LEFT] else ACCEL
-            self.facing=not k[pygame.K_LEFT]
+            # Make the options window modal (grabs focus)
+            self.options_window.grab_set()
+            self.options_window.transient(self.root)
+
+            options_frame = tk.Frame(self.options_window, bg='#0a0a2a')
+            options_frame.pack(expand=True, fill='both', padx=20, pady=20)
+
+            # --- Graphics Quality ---
+            graphics_frame = tk.Frame(options_frame, bg='#0a0a2a')
+            graphics_frame.pack(pady=10)
+
+            graphics_label = tk.Label(
+                graphics_frame,
+                text="Graphics Quality:",
+                font=('Arial', 12),
+                fg='white',
+                bg='#0a0a2a'
+            )
+            graphics_label.pack(side='left', padx=(20, 10))
+
+            # We need a style for the Combobox
+            style = ttk.Style()
+            
+            # Configure TCombobox style
+            style.configure('TCombobox', 
+                            fieldbackground='#333333', 
+                            background='#555555', 
+                            foreground='white',
+                            arrowcolor='white')
+            style.map('TCombobox',
+                      fieldbackground=[('readonly', '#333333')],
+                      selectbackground=[('readonly', '#0078d7')],
+                      selectforeground=[('readonly', 'white')])
+
+            self.graphics_var = tk.StringVar(value=self.settings.get("graphics_quality", "Medium"))
+            graphics_options = ["Low", "Medium", "High", "Ultra"]
+            graphics_dropdown = ttk.Combobox(
+                graphics_frame,
+                textvariable=self.graphics_var,
+                values=graphics_options,
+                state='readonly',
+                width=15,
+                font=('Arial', 12)
+            )
+            graphics_dropdown.pack(side='left', padx=10)
+
+            # --- Enable Music ---
+            music_frame = tk.Frame(options_frame, bg='#0a0a2a')
+            music_frame.pack(pady=10)
+
+            self.music_var = tk.BooleanVar(value=self.settings.get("music_enabled", True))
+            music_check = tk.Checkbutton(
+                music_frame,
+                text="Enable Music",
+                variable=self.music_var,
+                font=('Arial', 12),
+                fg='white',
+                bg='#0a0a2a',
+                selectcolor='#333333', # Color of the checkbg
+                activebackground='#0a0a2a',
+                activeforeground='white',
+                onvalue=True,
+                offvalue=False
+            )
+            music_check.pack()
+
+            # --- Sound Volume ---
+            volume_frame = tk.Frame(options_frame, bg='#0a0a2a')
+            volume_frame.pack(pady=10, fill='x', padx=20)
+
+            volume_label = tk.Label(
+                volume_frame,
+                text="Sound Volume:",
+                font=('Arial', 12),
+                fg='white',
+                bg='#0a0a2a'
+            )
+            volume_label.pack(side='left', padx=(20, 10))
+
+            self.volume_var = tk.IntVar(value=self.settings.get("sound_volume", 50))
+            volume_scale = tk.Scale(
+                volume_frame,
+                from_=0,
+                to=100,
+                orient='horizontal',
+                variable=self.volume_var,
+                bg='#0a0a2a',
+                fg='white',
+                highlightbackground='#0a0a2a',
+                troughcolor='#333333',
+                activebackground='#FF0000'
+            )
+            volume_scale.pack(side='left', fill='x', expand=True, padx=10)
+
+            # --- Reset to Defaults ---
+            reset_frame = tk.Frame(options_frame, bg='#0a0a2a')
+            reset_frame.pack(pady=20)
+
+            reset_button = tk.Button(
+                reset_frame,
+                text="Reset to Defaults",
+                command=self.reset_options,
+                font=('Arial', 12),
+                width=15,
+                height=1,
+                bg='#555555',
+                fg='white',
+                relief='raised',
+                bd=4,
+                activebackground='#333333',
+                activeforeground='white'
+            )
+            reset_button.pack()
+
+            # --- Close Button ---
+            close_button = tk.Button(
+                options_frame,
+                text="Save & Close",
+                command=self.close_options,
+                font=('Arial', 12, 'bold'),
+                width=15,
+                height=2,
+                bg='#FF0000',
+                fg='white',
+                relief='raised',
+                bd=4,
+                activebackground='#CC0000',
+                activeforeground='white'
+            )
+            close_button.pack(pady=20, side='bottom')
+        
+        except Exception as e:
+            self.status_label.config(text=f"Error opening options: {e}")
+            print(f"Error opening options: {e}")
+
+    def reset_options(self):
+        self.graphics_var.set("Medium")
+        self.music_var.set(True)
+        self.volume_var.set(50)
+        messagebox.showinfo("Reset", "Options have been reset to defaults.")
+
+    def close_options(self):
+        # Update settings with new values
+        self.settings["graphics_quality"] = self.graphics_var.get()
+        self.settings["music_enabled"] = self.music_var.get()
+        self.settings["sound_volume"] = self.volume_var.get()
+        
+        # Save the settings
+        if self.save_settings():
+            self.status_label.config(text=f"Options saved! Graphics: {self.settings['graphics_quality']}")
         else:
-            if abs(self.vx)<20: self.vx=0
-            ax=-FRICTION if self.vx>0 else FRICTION if self.vx<0 else 0
-        maxv=MAX_RUN if k[pygame.K_x] else MAX_WALK
-        self.vx=clamp(self.vx+ax*dt,-maxv,maxv)
-        self.coyote=max(0,self.coyote-dt); self.buf=max(0,self.buf-dt)
-        if g.jump_pressed: self.buf=JUMP_BUF
-        if self.buf>0 and self.coyote>0:
-            self.vy=JUMP_VEL; self.buf=self.coyote=0
-        if not (k[pygame.K_z] or k[pygame.K_SPACE]) and self.vy<JUMP_CUT:
-            self.vy=JUMP_CUT
-        if self.fire and g.shoot_pressed: spawn_fireball(self)
-        self.vy+=GRAVITY*dt; self._collide(g.level,dt)
-        # pickups & hazards
-        coins = g.level.collect_coins_in_rect(self.rect)
-        if coins:
-            self.coins += coins
-            self.score += coins*100
-            if self.coins >= 100:
-                self.coins -= 100
-                self.lives += 1
-        if g.level.harm(self.rect): self.hurt(g)
-        if self.rect.top>g.level.h*TILE: self.die(g)
-        for goal in g.level.goal_rects:
-            if self.rect.colliderect(goal): g.win()
-        self.inv=max(0,self.inv-dt)
-    def hurt(self,g):
-        if self.inv>0:return
-        if self.fire: self.fire=False
-        elif self.big: self.big=False
-        else: self.die(g)
-        self.inv=1.2
-    def die(self,g):
-        if self.dead:return
-        self.dead=True; self.vx=0; self.vy=-320; g.player_died()
-    def draw(self,g,s,cx):
-        r=self.rect.move(-cx,0)
-        color=(228,0,88) if not self.big else (0,120,248)
-        if self.inv>0 and int(time.time()*10)%2==0:
-            return  # blink when invincible
-        pygame.draw.rect(s,color,r)
+            self.status_label.config(text="Error saving options!")
+        
+        # Release grab and destroy the window
+        self.options_window.grab_release()
+        self.options_window.destroy()
 
-class Walker(Entity):
-    def __init__(self,x,y): super().__init__(x,y,14,14); self.vx=-40
-    def update(self,g,dt):
-        self.vy+=GRAVITY*dt*0.9; self.rect.x+=int(self.vx*dt)
-        # turn on bump
-        for gx,gy in g.level.solid_cells(self.rect):
-            c=rect_from_grid(gx,gy)
-            if self.vx>0 and self.rect.right>c.left: self.rect.right=c.left; self.vx=-40
-            elif self.vx<0 and self.rect.left<c.right: self.rect.left=c.right; self.vx=40
-        self.rect.y+=int(self.vy*dt)
-        on_ground=False
-        for gx,gy in g.level.solid_cells(self.rect):
-            c=rect_from_grid(gx,gy)
-            if self.vy>0 and self.rect.bottom>c.top:
-                self.rect.bottom=c.top; self.vy=0; on_ground=True
-        # simple edge turn-around when about to fall
-        ahead = self.rect.midbottom[0] + (8 if self.vx>0 else -8)
-        gx = int(ahead//TILE); gy = int(self.rect.bottom//TILE)
-        if gy < g.level.h and (gx<0 or gx>=g.level.w or g.level.tile(gx,gy) not in SOLID_TILES):
-            self.vx *= -1
-        if self.rect.colliderect(g.player.rect) and not g.player.inv:
-            if g.player.vy>80 and g.player.rect.bottom<=self.rect.top+14:
-                self.remove=True; g.player.vy=-250; g.player.score+=200
-            else: g.player.hurt(g)
-    def draw(self,g,s,cx):
-        pygame.draw.rect(s,(168,80,0),self.rect.move(-cx,0))
+    def quit_game(self):
+        self.status_label.config(text="Thanks for playing!")
+        self.root.after(1000, self.root.destroy)
 
-class Fireball(Entity):
-    def __init__(self,x,y,r=True): super().__init__(x,y,6,6); self.vx=260 if r else -260; self.vy=-60; self.life=2.0
-    def update(self,g,dt):
-        self.vy+=GRAVITY*dt*0.6; self.rect.x+=int(self.vx*dt); self.rect.y+=int(self.vy*dt)
-        self.life-=dt
-        if self.life<=0: self.remove=True
-        for e in list(g.entities):
-            if isinstance(e,Walker) and self.rect.colliderect(e.rect):
-                e.remove=True; self.remove=True; g.player.score+=200
-        for gx,gy in g.level.solid_cells(self.rect):
-            c=rect_from_grid(gx,gy)
-            if self.vy>0 and self.rect.bottom>c.top:
-                self.rect.bottom=c.top; self.vy=-abs(self.vy)*0.6
-    def draw(self,g,s,cx):
-        pygame.draw.circle(s,(248,184,0),self.rect.move(-cx,0).center,3)
 
-def spawn_fireball(p):
-    now=time.time()
-    if hasattr(p,"_last_fire") and now-p._last_fire<0.25:return
-    p._last_fire=now
-    p.game.entities.append(Fireball(p.rect.centerx+(10 if p.facing else -10),p.rect.centery,p.facing))
+# ------------------------------
+# Ursina 3D Game Engine
+# ------------------------------
+class UrsinaGame:
+    def __init__(self, settings=None):
+        self.app = None
+        self.settings = settings or {}
+        
+    def run(self):
+        # Import Ursina here to avoid Tkinter conflicts
+        try:
+            from ursina import (
+                Ursina, Entity, time, held_keys, Vec3, color, 
+                camera, Sky, Text, application, destroy, scene, 
+                DirectionalLight, AmbientLight, raycast, math
+            )
+            from ursina.prefabs.first_person_controller import FirstPersonController
+        except ImportError:
+            print("--------------------------------------------------")
+            print("FATAL ERROR: 'ursina' module not found.")
+            print("Please install Ursina to play this game:")
+            print("  pip install ursina")
+            print("--------------------------------------------------")
+            return # Exit the run method if ursina is not found
+            
+        import math
+        import random
+        import time as pytime
+        
+        # Game constants
+        GRAVITY = 1
+        JUMP_HEIGHT = 0.5
+        PLAYER_SPEED = 6
+        JUMP_DURATION = 0.3
+        
+        class UltraMario3D(Entity):
+            def __init__(self):
+                super().__init__(
+                    model='cube',
+                    color=color.clear, # Make the root entity invisible
+                    scale=(1, 2, 1),
+                    position=(0, 10, 0),
+                    collider='box'
+                )
+                self.speed = PLAYER_SPEED
+                self.jump_height = JUMP_HEIGHT
+                self.jump_duration = JUMP_DURATION
+                self.jumping = False
+                self.air_time = 0
+                
+                self.grounded = False
+                self.health = 100
+                self.coins = 0
+                self.score = 0
+                self.velocity_y = 0
 
-# ───────────── Level Generation ─────────────
-def make_level(world,stage):
-    rng=random.Random(world*100+stage*11)
-    w,h=120,BASE_H//TILE
-    g=[" " * w for _ in range(h)]; g=list(g)
-    # ground
-    for x in range(w):
-        for y in range(GROUND_Y,h): g[y]=g[y][:x]+'X'+g[y][x+1:]
-    # start
-    g[GROUND_Y-1]=g[GROUND_Y-1][:2]+'S'+g[GROUND_Y-1][3:]
-    # finish pole + base
-    fx=w-10
-    for y in range(2,GROUND_Y-1): g[y]=g[y][:fx]+'F'+g[y][fx+1:]
-    g[GROUND_Y-1]=g[GROUND_Y-1][:fx+3]+'G'+g[GROUND_Y-1][fx+4:]
-    # platforms / hazards / coins / enemies
-    for _ in range(12):
-        px=rng.randint(6,fx-12); py=rng.randint(5,GROUND_Y-4)
-        for dx in range(rng.randint(3,7)):
-            if px+dx<fx-6:
-                g[py]=g[py][:px+dx]+'#'+g[py][px+dx+1:]
-    for _ in range(10):
-        hx=rng.randint(8,fx-12)
-        g[GROUND_Y-1]=g[GROUND_Y-1][:hx]+'H'+g[GROUND_Y-1][hx+1:]
-    lvl=Level(g)
-    for _ in range(12):
-        gx=rng.randint(5,fx-10)
-        if rng.random()<0.45: lvl._set(gx,GROUND_Y-2,'E')
-        else: lvl._set(gx,GROUND_Y-3,'C')
-    return lvl
+                # Create Mario-like appearance
+                self.create_mario_model()
+                
+                # Camera setup
+                camera.parent = self
+                camera.position = (0, 5, -8)
+                camera.rotation_x = 20
+                camera.rotation_y = 0
+            
+            def create_mario_model(self):
+                # Head
+                self.head = Entity(
+                    parent=self,
+                    model='sphere',
+                    color=color.rgb(255, 200, 150),
+                    scale=(0.8 / self.scale_x, 0.8 / self.scale_y, 0.8 / self.scale_z),
+                    position=(0, 0.8, 0)
+                )
+                
+                # Hat
+                self.hat = Entity(
+                    parent=self.head,
+                    model='cube',
+                    color=color.red,
+                    scale=(1.2, 0.4, 1.2),
+                    position=(0, 0.5, 0)
+                )
+                
+                # Body
+                self.body_model = Entity(
+                    parent=self,
+                    model='cube',
+                    color=color.red,
+                    scale=(0.8 / self.scale_x, 1 / self.scale_y, 0.6 / self.scale_z),
+                    position=(0, 0, 0)
+                )
+                
+                # Overalls
+                self.overalls = Entity(
+                    parent=self.body_model,
+                    model='cube',
+                    color=color.blue,
+                    scale=(1.1, 0.7, 1.1),
+                    position=(0, -0.3, 0)
+                )
+                
+                # Arms
+                self.left_arm = Entity(
+                    parent=self,
+                    model='cube',
+                    color=color.rgb(255, 200, 150),
+                    scale=(0.3 / self.scale_x, 0.8 / self.scale_y, 0.3 / self.scale_z),
+                    position=(-0.6, 0, 0)
+                )
+                self.right_arm = Entity(
+                    parent=self,
+                    model='cube',
+                    color=color.rgb(255, 200, 150),
+                    scale=(0.3 / self.scale_x, 0.8 / self.scale_y, 0.3 / self.scale_z),
+                    position=(0.6, 0, 0)
+                )
+                
+                # Legs
+                self.left_leg = Entity(
+                    parent=self,
+                    model='cube',
+                    color=color.blue,
+                    scale=(0.35 / self.scale_x, 0.8 / self.scale_y, 0.35 / self.scale_z),
+                    position=(-0.25, -0.8, 0)
+                )
+                self.right_leg = Entity(
+                    parent=self,
+                    model='cube',
+                    color=color.blue,
+                    scale=(0.35 / self.scale_x, 0.8 / self.scale_y, 0.35 / self.scale_z),
+                    position=(0.25, -0.8, 0)
+                )
+            
+            def update_movement(self):
+                # Movement
+                direction = Vec3(0, 0, 0)
+                if held_keys['w'] or held_keys['up arrow']:
+                    direction += self.forward
+                if held_keys['s'] or held_keys['down arrow']:
+                    direction -= self.forward
+                if held_keys['a'] or held_keys['left arrow']:
+                    direction -= self.right
+                if held_keys['d'] or held_keys['right arrow']:
+                    direction += self.right
+                
+                # Rotation
+                self.rotation_y += held_keys['right arrow'] * time.dt * 100
+                self.rotation_y -= held_keys['left arrow'] * time.dt * 100
 
-# ───────────── Game Controller ─────────────
-class Game:
-    def __init__(self):
-        self.state="title"; self.world=self.stage=1
-        self.level=None; self.player=None; self.entities=[]
-        self.cam_x=0; self.time_left=START_TIME
-        self.jump_pressed=self.shoot_pressed=False
-        self._pj=self._ps=False
-        self.tiles = Tileset()
-        self._title_blink = 0.0
-    def start(self): self.load(1,1)
-    def load(self,w,s):
-        self.level=make_level(w,s)
-        self.player=Player(self.level.spawn_x,self.level.spawn_y)
-        self.player.game=self  # type: ignore
-        self.entities=[Walker(x,y) for x,y in self.level.enemy_spawns]
-        self.state="play"; self.time_left=START_TIME; self.cam_x=0
-    def player_died(self):
-        assert self.player is not None
-        if self.player.lives>0:
-            self.player.lives-=1; self.load(self.world,self.stage)
-        else:
-            self.state="gameover"
-    def win(self):
-        nxt=self.stage+1
-        if nxt>4:
-            self.stage=1; self.world+=1
-        else: self.stage=nxt
-        self.load(self.world,self.stage)
-    def update(self,dt):
-        k=pygame.key.get_pressed()
-        pressed_jump = (k[pygame.K_z] or k[pygame.K_SPACE])
-        pressed_shoot = k[pygame.K_x]
-        self.jump_pressed = pressed_jump and not self._pj
-        self.shoot_pressed = pressed_shoot and not self._ps
-        self._pj = pressed_jump; self._ps = pressed_shoot
+                if direction.length() > 0:
+                    direction = direction.normalized()
+                    
+                    # Prevent moving through walls
+                    move_ray = raycast(self.position + Vec3(0, 0.5, 0), direction, distance=0.6, ignore=[self])
+                    if not move_ray.hit:
+                        self.position += direction * self.speed * time.dt
+                    
+                    # Simple animation
+                    self.left_leg.rotation_x = math.sin(pytime.time() * 10) * 30
+                    self.right_leg.rotation_x = -math.sin(pytime.time() * 10) * 30
+                else:
+                    self.left_leg.rotation_x = 0
+                    self.right_leg.rotation_x = 0
 
-        if self.state=="title":
-            self._title_blink += dt
-            if self.jump_pressed or k[pygame.K_RETURN]:
-                self.start()
-            return
-        if self.state=="gameover":
-            if self.jump_pressed or k[pygame.K_RETURN]:
-                self.state="title"
-            return
-        if self.state=="pause":
-            if self.jump_pressed or k[pygame.K_p]:
-                self.state="play"
-            return
-        if self.state=="play":
-            assert self.player is not None and self.level is not None
-            if k[pygame.K_p]:
-                self.state="pause"; return
-            self.time_left=max(0,self.time_left-dt)
-            if self.time_left<=0:
-                self.player.die(self)
-            self.player.update(self,dt)
-            for e in list(self.entities): e.update(self,dt)
-            self.entities=[e for e in self.entities if not e.remove]
-            # camera (fixed bug: truncated clamp)
-            max_cam = max(0, self.level.w*TILE - BASE_W)
-            target = int(self.player.rect.centerx - BASE_W//3)
-            self.cam_x = int(clamp(target, 0, max_cam))
-    def draw(self, screen, surf):
-        s = surf
-        s.blit(self.tiles.sky(), (0,0))
-        if self.state=="title":
-            self.draw_title(s)
-        elif self.state in ("play","pause","gameover"):
-            self.draw_world(s)
-            self.draw_hud(s)
-            if self.state=="pause": self.draw_pause(s)
-            if self.state=="gameover": self.draw_game_over(s)
-        # scale up
-        pygame.transform.scale(s, (SCREEN_W, SCREEN_H), screen)
+            def update_gravity(self):
+                # Gravity
+                if not self.grounded:
+                    self.velocity_y -= GRAVITY * time.dt
+                    self.y += self.velocity_y
+                
+                # Check for ground
+                ground_ray = raycast(self.position, Vec3(0, -1, 0), distance=1.1, ignore=[self])
+                
+                if ground_ray.hit:
+                    if self.velocity_y < 0:
+                        self.y = ground_ray.world_point.y + 1
+                        self.velocity_y = 0
+                        self.grounded = True
+                        self.jumping = False
+                else:
+                    self.grounded = False
 
-    def draw_title(self, s):
-        t1 = self.tiles.font_big.render(GAME_TITLE, True, self.tiles.c['black'])
-        t1w = self.tiles.font_big.render(GAME_TITLE, True, self.tiles.c['white'])
-        s.blit(t1, (BASE_W//2 - t1.get_width()//2 +1, 60+1))
-        s.blit(t1w,(BASE_W//2 - t1w.get_width()//2 , 60))
-        msg = "Press ENTER or Z to Start"
-        if int(self._title_blink*2)%2==0:
-            t2 = self.tiles.font_hud.render(msg, True, self.tiles.c['white'])
-            s.blit(t2,(BASE_W//2 - t2.get_width()//2, 130))
-        # credit/footer
-        foot = self.tiles.font_hud.render("Z/Space: Jump  |  X: Run/Fire  |  P: Pause", True, self.tiles.c['white'])
-        s.blit(foot,(BASE_W//2 - foot.get_width()//2, BASE_H-24))
+            def update(self):
+                self.update_movement()
+                self.update_gravity()
 
-    def draw_world(self, s):
-        assert self.level is not None and self.player is not None
-        cx = self.cam_x
-        # tiles (cull to view)
-        gx0 = max(0, cx//TILE)
-        gx1 = min(self.level.w-1, (cx+BASE_W)//TILE + 1)
-        for y in range(self.level.h):
-            for x in range(gx0,gx1+1):
-                ch = self.level.tile(x,y)
-                if ch != ' ':
-                    s.blit(self.tiles.tile(ch),(x*TILE - cx, y*TILE))
-        # entities
-        for e in self.entities:
-            e.draw(self,s,cx)
-        # player last (on top)
-        self.player.draw(self,s,cx)
+            def jump(self):
+                if self.grounded:
+                    self.velocity_y = 0.2 # Adjust this value for jump height
+                    self.grounded = False
+                    self.jumping = True
 
-    def draw_hud(self, s):
-        assert self.player is not None
-        f = self.tiles.font_hud
-        col = self.tiles.c['white']
-        def text(tx, x, y): s.blit(f.render(tx, True, col),(x,y))
-        text(f"WORLD {self.world}-{self.stage}", 8, 8)
-        text(f"LIVES {self.player.lives}", 8, 18)
-        text(f"COIN {self.player.coins:02d}", 100, 8)
-        text(f"SCORE {self.player.score:06d}", 160, 8)
-        text(f"TIME {int(self.time_left):03d}", 220, 18)
+            def input(self, key):
+                if key == 'escape':
+                    application.quit()
+                if key == 'r':
+                    self.position = (0, 10, 0)
+                    self.velocity_y = 0
+                if key == 'space':
+                    self.jump()
+        
+        class GameWorld:
+            def __init__(self, custom_level_path=None):
+                self.custom_level_path = custom_level_path
+                self.create_environment()
+                self.coins = self.create_coins()
+                self.enemies = self.create_enemies()
+                self.create_platforms()
+                
+            def create_environment(self):
+                # Ground
+                Entity(
+                    model='plane',
+                    texture='white_cube',
+                    color=color.green,
+                    scale=(100, 1, 100),
+                    position=(0, 0, 0),
+                    collider='box'
+                )
+                
+                # Sky
+                Sky()
+                
+                # Load custom level if available
+                if self.custom_level_path and os.path.exists(self.custom_level_path):
+                    try:
+                        with open(self.custom_level_path, 'r') as f:
+                            level_data = json.load(f)
+                            self.load_custom_level(level_data)
+                    except Exception as e:
+                        print(f"Error loading custom level: {e}")
+                        self.create_default_level()
+                else:
+                    self.create_default_level()
+            
+            def create_default_level(self):
+                # Some platforms
+                for i in range(10):
+                    x = random.uniform(-20, 20)
+                    z = random.uniform(-20, 20)
+                    y = random.uniform(2, 10)
+                    Entity(
+                        model='cube',
+                        color=color.orange,
+                        scale=(random.uniform(2, 6), 0.5, random.uniform(2, 6)),
+                        position=(x, y, z),
+                        collider='box'
+                    )
+                
+                # A pyramid
+                for i in range(5):
+                    size = 5 - i
+                    Entity(
+                        model='cube',
+                        color=color.yellow,
+                        scale=(size*2, 1, size*2),
+                        position=(15, i, 15),
+                        collider='box'
+                    )
+            
+            def load_custom_level(self, level_data):
+                # Load platforms from custom level data
+                if 'platforms' in level_data:
+                    for platform in level_data['platforms']:
+                        Entity(
+                            model=platform.get('model', 'cube'),
+                            color=color.rgba(*platform.get('color', [255, 165, 0, 255])),
+                            scale=platform.get('scale', [3, 0.5, 3]),
+                            position=platform.get('position', [0, 2, 0]),
+                            collider='box'
+                        )
+                
+                # Load other level elements as needed
+                # This is a basic implementation, can be expanded
+            
+            def create_coins(self):
+                coins_list = []
+                for i in range(20):
+                    x = random.uniform(-15, 15)
+                    z = random.uniform(-15, 15)
+                    y = random.uniform(2, 8)
+                    
+                    coin = Entity(
+                        model='cylinder',
+                        color=color.gold,
+                        scale=(0.5, 0.1, 0.5),
+                        position=(x, y, z),
+                        collider='sphere'
+                    )
+                    coins_list.append(coin)
+                return coins_list
+            
+            def create_enemies(self):
+                enemies_list = []
+                for i in range(5):
+                    x = random.uniform(-10, 10)
+                    z = random.uniform(-10, 10)
+                    
+                    enemy = Entity(
+                        model='cube',
+                        color=color.brown,
+                        scale=(1, 1, 1),
+                        position=(x, 1, z),
+                        collider='box'
+                    )
+                    enemies_list.append(enemy)
+                return enemies_list
+            
+            def create_platforms(self):
+                # Create some floating platforms
+                positions = [
+                    (0, 5, 5),
+                    (8, 8, 8),
+                    (-8, 12, -8),
+                    (12, 15, -12),
+                    (-12, 18, 12)
+                ]
+                
+                for pos in positions:
+                    Entity(
+                        model='cube',
+                        color=color.blue,
+                        scale=(3, 0.5, 3),
+                        position=pos,
+                        collider='box'
+                    )
+        
+        class GameUI:
+            def __init__(self, player):
+                self.player = player
+                
+                self.health_text = Text(
+                    text=f'HEALTH: {self.player.health}',
+                    origin=(-.5, .5),
+                    position=(-0.85, 0.48),
+                    scale=2,
+                    color=color.white
+                )
+                
+                self.coin_text = Text(
+                    text=f'COINS: {self.player.coins}',
+                    origin=(-.5, .5),
+                    position=(-0.85, 0.43),
+                    scale=2,
+                    color=color.yellow
+                )
+                
+                self.score_text = Text(
+                    text=f'SCORE: {self.player.score}',
+                    origin=(-.5, .5),
+                    position=(-0.85, 0.38),
+                    scale=2,
+                    color=color.white
+                )
+                
+                self.instructions = Text(
+                    text='WASD: Move | SPACE: Jump | R: Reset | ESC: Quit',
+                    origin=(0, 0),
+                    position=(0, -0.45),
+                    scale=1.5,
+                    color=color.white
+                )
+            
+            def update(self):
+                self.health_text.text = f'HEALTH: {self.player.health}'
+                self.coin_text.text = f'COINS: {self.player.coins}'
+                self.score_text.text = f'SCORE: {self.player.score}'
+        
+        # Create the Ursina application
+        app = Ursina(title="Ultra Mario 3D Bros - Final Build 1.x", development_mode=False)
+        
+        # Apply graphics settings
+        graphics_quality = self.settings.get("graphics_quality", "Medium")
+        if graphics_quality == "Low":
+            application.render_mode = 'wireframe'
+        elif graphics_quality == "High":
+            application.render_mode = 'default'
+        elif graphics_quality == "Ultra":
+            application.render_mode = 'default'
+            # Additional high-quality settings could be applied here
+        
+        # Create game objects
+        player = UltraMario3D()
+        world = GameWorld(self.settings.get("custom_level_path", None))
+        ui = GameUI(player)
+        
+        # Add lighting
+        DirectionalLight(parent=scene, y=10, z=5, shadows=True, rotation=(30, 30, 0))
+        AmbientLight(color=color.rgba(100, 100, 100, 255))
+        
+        def update():
+            player.update()
+            ui.update()
+            
+            # Check coin collection
+            for coin in world.coins[:]:
+                if player.intersects(coin).hit:
+                    player.coins += 1
+                    player.score += 100
+                    world.coins.remove(coin)
+                    
+                    # Create collection effect
+                    for i in range(5):
+                        particle = Entity(
+                            model='sphere',
+                            color=color.yellow,
+                            scale=0.1,
+                            position=coin.position
+                        )
+                        particle.animate_position(
+                            particle.position + Vec3(random.uniform(-2, 2), random.uniform(0, 3), random.uniform(-2, 2)),
+                            duration=0.5
+                        )
+                        particle.animate_scale(0, duration=0.5)
+                        destroy(particle, delay=0.5)
+                    
+                    destroy(coin)
+            
+            # Check enemy collision
+            for enemy in world.enemies:
+                if player.intersects(enemy).hit:
+                    # Simple check: reset player if not jumping on top
+                    if not player.jumping and player.y < (enemy.y + 1.1):
+                        player.position = (0, 10, 0)
+                        player.health -= 10
+                    elif player.velocity_y < -0.05: # Jumping on top
+                        destroy(enemy)
+                        world.enemies.remove(enemy)
+                        player.score += 200
+                        player.jump() # bounce
+        
+        def input(key):
+            player.input(key)
+        
+        # Run the game
+        app.run()
 
-    def draw_pause(self, s):
-        t = self.tiles.font_big.render("PAUSED", True, self.tiles.c['white'])
-        s.blit(t,(BASE_W//2 - t.get_width()//2, BASE_H//2 - 8))
 
-    def draw_game_over(self, s):
-        t = self.tiles.font_big.render("GAME OVER", True, self.tiles.c['white'])
-        s.blit(t,(BASE_W//2 - t.get_width()//2, BASE_H//2 - 8))
-        t2 = self.tiles.font_hud.render("Press ENTER/Z to return", True, self.tiles.c['white'])
-        s.blit(t2,(BASE_W//2 - t2.get_width()//2, BASE_H//2 + 12))
-
-# ───────────── Main ─────────────
+# ------------------------------
+# Main Execution
+# ------------------------------
 def main():
-    pygame.init()
-    pygame.display.set_caption(GAME_TITLE)
-    screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
-    surf = pygame.Surface((BASE_W, BASE_H)).convert_alpha()
-    clock = pygame.time.Clock()
+    # Check if we should launch Tkinter menu or go directly to game
+    if len(sys.argv) > 1 and sys.argv[1] == '--direct':
+        # Launch Ursina directly
+        game = UrsinaGame()
+        game.run()
+    else:
+        # Launch Tkinter menu
+        root = tk.Tk()
+        app = UltraMarioLauncher(root)
+        root.mainloop()
 
-    game = Game()
-    running = True
-    while running:
-        dt = clock.tick(FPS) / 1000.0
-        dt = min(dt, 1/20)  # safety cap
-        for ev in pygame.event.get():
-            if ev.type == pygame.QUIT:
-                running=False
-            elif ev.type == pygame.KEYDOWN:
-                if ev.key == pygame.K_ESCAPE:
-                    running=False
-                elif ev.key == pygame.K_r and game.state=="play":
-                    game.load(game.world, game.stage)
-        game.update(dt)
-        game.draw(screen, surf)
-        pygame.display.flip()
-    pygame.quit()
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
